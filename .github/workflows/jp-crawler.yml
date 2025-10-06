@@ -2,22 +2,22 @@ name: JP Crawler (auto)
 
 on:
   schedule:
-    - cron: '*/15 * * * *'    # run every 15 minutes
-  workflow_dispatch:          # allow manual trigger
+    - cron: '*/15 * * * *'    # 15分ごとに自動実行 (run every 15 minutes)
+  workflow_dispatch:          # 手動実行も可能 (manual trigger)
 
 permissions:
-  contents: write
+  contents: write             # リポジトリへの書き込み権限 (allow write access)
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      TZ: Asia/Tokyo
+      TZ: Asia/Tokyo          # 日本時間 (Japan timezone)
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -26,11 +26,11 @@ jobs:
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run crawler
+      - name: Run crawler script
         run: |
           python crawl_nip.py
 
-      - name: Commit and push changes
+      - name: Commit and push CSV file
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "auto: update jp_latest.csv"
