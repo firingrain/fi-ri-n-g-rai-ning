@@ -24,7 +24,7 @@ jobs:
 
       - name: Run crawler
         run: |
-          python crawl_nip.py
+          python crawl_jp.py
 
       - name: Commit & Push if changed
         uses: stefanzweifel/git-auto-commit-action@v5
