@@ -1,12 +1,8 @@
-name: JP Crawler (auto)
-
+name: JP Crawler 
 on:
   schedule:
     - cron: "*/15 * * * *"     # 每15分钟自动运行
   workflow_dispatch:            # 允许手动触发按钮
-
-permissions:
-  contents: write
 
 jobs:
   run:
