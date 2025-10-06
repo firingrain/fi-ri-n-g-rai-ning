@@ -1,37 +1,10 @@
-name: JP Crawler (auto)
+name: Smoke Test
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'    # 15分ごとに自動実行 (run every 15 minutes)
-  workflow_dispatch:          # 手動実行も可能 (manual trigger)
-
-permissions:
-  contents: write             # リポジトリへの書き込み権限 (allow write access)
+  workflow_dispatch:   # 手动按钮测试（先别用 schedule）
 
 jobs:
-  run:
+  test:
     runs-on: ubuntu-latest
-    env:
-      TZ: Asia/Tokyo          # 日本時間 (Japan timezone)
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install dependencies
-        run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: Run crawler script
-        run: |
-          python crawl_nip.py
-
-      - name: Commit and push CSV file
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "auto: update jp_latest.csv"
-          file_pattern: jp_latest.csv
+      - run: echo "hello from Actions"
