@@ -1,33 +1,50 @@
-name: JP Crawler 
+name: JP Auto Stock Crawler
+
 on:
   schedule:
     - cron: "*/15 * * * *"     # 每15分钟自动运行
-  workflow_dispatch:            # 允许手动触发按钮
+  workflow_dispatch:            # 允许手动触发
+
+permissions:
+  contents: write
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
       TZ: Asia/Tokyo
+
     steps:
-      - name: Checkout
+      - name: 📦 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
-      - name: Install dependencies
+      - name: 🔧 Install dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 pandas
 
-      - name: Run crawler
+      - name: ⚙️ Generate JP Watchlist (AI自动选股)
+        run: |
+          python generate_watchlist.py
+
+      - name: 💹 Run JP Crawler (抓取行情)
         run: |
           python crawl_jp.py
 
-      - name: Commit & Push if changed
+      - name: 🧠 Run JP Analysis (AI行情分析)
+        run: |
+          python analyze_jp.py
+
+      - name: 💾 Commit & Push if changed
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "auto: update jp_latest.csv"
-          file_pattern: jp_latest.csv
+          commit_message: "auto: update jp data"
+          file_pattern: |
+            jp_latest.csv
+            watchlist_jp.txt
+            jp_analysis.txt
