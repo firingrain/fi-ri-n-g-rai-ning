@@ -2,49 +2,54 @@ name: JP Auto Stock Crawler
 
 on:
   schedule:
-    - cron: "*/15 * * * *"     # 每15分钟自动运行
-  workflow_dispatch:            # 允许手动触发
-
-permissions:
-  contents: write
+    - cron: "30 6 * * 1-5"   # UTC 06:30 = JST 15:30
+  workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    env:
-      TZ: Asia/Tokyo
-
     steps:
-      - name: 📦 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.x"
+          python-version: "3.11"
 
-      - name: 🔧 Install dependencies
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Debug input files
         run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 pandas
+          echo "===== config_jp.txt ====="
+          sed -n '1,200p' config_jp.txt || true
+          echo "===== symbols_jp.txt ====="
+          sed -n '1,200p' symbols_jp.txt || true
 
-      - name: ⚙️ Generate JP Watchlist (AI自动选股)
+      - name: Run JP Crawler（抓取+筛选）
+        id: crawl
         run: |
-          python generate_watchlist.py
+          set -e
+          python crawl_jp.py || true
+          echo "===== jp_latest.csv (head) ====="
+          if [ -f jp_latest.csv ]; then head -n 10 jp_latest.csv || true; fi
+          if [ -f jp_latest.csv ] && [ "$(wc -l < jp_latest.csv)" -gt 1 ]; then
+            echo "has_data=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_data=false" >> $GITHUB_OUTPUT
+          fi
+          echo "has_data=$(cat $GITHUB_OUTPUT | sed -n 's/^has_data=//p')"
 
-      - name: 💹 Run JP Crawler (抓取行情)
+      - name: Generate JP Watchlist（AI自选榜）
+        if: steps.crawl.outputs.has_data == 'true'
+        run: python generate_watchlist.py
+
+      - name: Commit & Push if changed
+        if: steps.crawl.outputs.has_data == 'true'
         run: |
-          python crawl_jp.py
-
-      - name: 🧠 Run JP Analysis (AI行情分析)
-        run: |
-          python analyze_jp.py
-
-      - name: 💾 Commit & Push if changed
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "auto: update jp data"
-          file_pattern: |
-            jp_latest.csv
-            watchlist_jp.txt
-            jp_analysis.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add jp_latest.csv watchlist_jp.txt || true
+          git commit -m "auto: update stock data" || echo "no changes"
+          git push
