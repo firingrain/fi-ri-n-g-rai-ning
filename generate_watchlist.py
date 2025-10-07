@@ -1,63 +1,78 @@
-import requests
-from bs4 import BeautifulSoup
-import re
+# -*- coding: utf-8 -*-
+"""
+generate_watchlist.py
+从 jp_latest.csv 读取数据，按 Change% 排序，生成 watchlist_jp.txt
+✔ 自动读取 TOP_LIMIT
+✔ 自动忽略全角数字、空格、注释、中文说明
+✔ 没数据也不会报错
+"""
+
+import pandas as pd
 from datetime import datetime
+import pytz
+from pathlib import Path
+import re, unicodedata
 
-# === 读取配置参数 ===
-params = {}
-with open("config_jp.txt", "r", encoding="utf-8") as f:
-    for line in f:
-        if "=" in line and not line.strip().startswith("#"):
-            k, v = [x.strip() for x in line.split("=")]
+CSV_FILE = "jp_latest.csv"
+OUT_FILE = "watchlist_jp.txt"
+CFG_FILE = "config_jp.txt"
+
+# ---------- 通用安全转换函数 ----------
+def to_number_safe(s, default=0.0):
+    """自动将字符串转为 float/int，兼容全角、空格、注释"""
+    if s is None:
+        return default
+    s = unicodedata.normalize("NFKC", str(s))
+    s = s.split("#", 1)[0].strip()
+    if not s:
+        return default
+    try:
+        if "." in s:
+            return float(s)
+        return float(int(s))
+    except Exception:
+        return default
+
+# ---------- 读取配置中的 TOP_LIMIT ----------
+def load_top_limit():
+    top = 5
+    p = Path(CFG_FILE)
+    if not p.exists():
+        return top
+    pat = re.compile(r"^\s*TOP_LIMIT\s*=\s*(.+)$")
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        m = pat.match(raw)
+        if m:
+            val = to_number_safe(m.group(1), top)
             try:
-                params[k] = float(v)
-            except:
-                params[k] = v
+                return max(1, int(val))
+            except Exception:
+                return top
+    return top
 
-MIN_CHANGE = params.get("MIN_CHANGE", 3)
-MIN_TURNOVER = params.get("MIN_TURNOVER", 5)
-MIN_VALUE = params.get("MIN_VALUE", 5)
-TOP_LIMIT = int(params.get("TOP_LIMIT", 20))
+# ---------- 读取行情数据 ----------
+if not Path(CSV_FILE).exists():
+    print(f"⚠️ 找不到 {CSV_FILE}，请先运行 crawl_jp.py")
+    raise SystemExit(1)
 
-# === 数据源（Yahoo!ファイナンス 値上がり率ランキング） ===
-url = "https://finance.yahoo.co.jp/ranking/price_up"
-r = requests.get(url, timeout=10)
-r.raise_for_status()
-soup = BeautifulSoup(r.text, "html.parser")
+df = pd.read_csv(CSV_FILE)
+if df.empty:
+    print("⚠️ jp_latest.csv 没有数据。")
+    raise SystemExit(1)
 
-rows = soup.select("table tbody tr")
-watchlist = []
+# ---------- 生成自选榜 ----------
+topn = load_top_limit()
+df_sorted = df.sort_values(by="Change%", ascending=False).head(topn)
 
-for tr in rows:
-    tds = tr.select("td")
-    if len(tds) < 5:
-        continue
+tokyo = pytz.timezone("Asia/Tokyo")
+timestamp = datetime.now(tokyo).strftime("%Y-%m-%d %H:%M:%S")
 
-    code = tds[1].get_text(strip=True)
-    change_text = tds[3].get_text(strip=True).replace("%", "").replace("+", "")
-    value_text = tds[4].get_text(strip=True).replace(",", "")
+lines = [f"# Top {topn} Gainers ({timestamp})"]
+for _, row in df_sorted.iterrows():
+    chg = row.get("Change%", None)
+    if pd.isna(chg):
+        chg = row.get("ChangePct", None)
+    lines.append(f"{row['Symbol']}  +{chg}%")
 
-    try:
-        change = float(change_text)
-    except:
-        change = 0.0
-    try:
-        value = float(re.findall(r"\d+", value_text)[0]) / 1e8  # 转换成亿日元
-    except:
-        value = 0.0
-
-    # 筛选逻辑（根据 config_jp.txt）
-    if change >= MIN_CHANGE and value >= MIN_VALUE:
-        watchlist.append(code)
-
-# 只保留前 TOP_LIMIT 只股票
-watchlist = watchlist[:TOP_LIMIT]
-
-# 写入 watchlist_jp.txt
-with open("watchlist_jp.txt", "w", encoding="utf-8") as f:
-    f.write("# Auto-generated watchlist\n")
-    f.write(f"# {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-    for c in watchlist:
-        f.write(f"{c}.T\n")
-
-print(f"✅ Generated {len(watchlist)} symbols into watchlist_jp.txt")
+Path(OUT_FILE).write_text("\n".join(lines), encoding="utf-8")
+print(f"✅ 已生成 {OUT_FILE}")
