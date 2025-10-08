@@ -1,1 +1,38 @@
+import re
 
+def as_int(params, key, default):
+    v = params.get(key, default)
+    s = str(v)
+    # 去掉行尾注释与两侧空白/引号
+    s = s.split('#', 1)[0].strip().strip('"\'')
+
+    # 全角数字转半角
+    trans = str.maketrans('０１２３４５６７８９＋－', '0123456789+-')
+    s = s.translate(trans)
+
+    # 只保留可组成整数的字符
+    s = re.sub(r'[^0-9+\-]', '', s)
+    try:
+        return int(s)
+    except Exception:
+        return int(default)
+
+def as_float(params, key, default):
+    v = params.get(key, default)
+    s = str(v)
+    s = s.split('#', 1)[0].strip().strip('"\'')
+
+    trans = str.maketrans('０１２３４５６７８９．＋－', '0123456789.+-')
+    s = s.translate(trans)
+
+    s = re.sub(r'[^0-9+\-\.]', '', s)
+    try:
+        return float(s)
+    except Exception:
+        return float(default)
+
+# 用法
+MIN_CHANGE   = as_float(params, "MIN_CHANGE", 5.0)
+MIN_TURNOVER = as_float(params, "MIN_TURNOVER", 8.0)
+MIN_VALUE    = as_int(params,   "MIN_VALUE",   20)
+TOP_LIMIT    = as_int(params,   "TOP_LIMIT",   10)
