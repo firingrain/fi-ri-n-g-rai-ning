@@ -2,54 +2,91 @@ name: JP Auto Stock Crawler
 
 on:
   schedule:
-    - cron: "30 6 * * 1-5"   # UTC 06:30 = JST 15:30
-  workflow_dispatch:
+    - cron: "30 6 * * 1-5"   # 每个工作日 UTC 06:30 触发（JST 15:30）
+  workflow_dispatch: {}       # 允许手动运行
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: jp-crawler
+  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Debug input files
         run: |
           echo "===== config_jp.txt ====="
-          sed -n '1,200p' config_jp.txt || true
+          sed -n '1,120p' config_jp.txt || true
           echo "===== symbols_jp.txt ====="
-          sed -n '1,200p' symbols_jp.txt || true
+          sed -n '1,120p' symbols_jp.txt || true
+          echo "===== watchlist files ====="
+          for f in watchlist_jp.txt watchlist_jp_growth.txt watchlist_jp_value.txt; do
+            echo "--- $f ---"; sed -n '1,80p' "$f" || true
+          done
 
-      - name: Run JP Crawler（抓取+筛选）
-        id: crawl
+      - name: Run crawler (抓取)
         run: |
           set -e
-          python crawl_jp.py || true
+          python crawl_jp.py
           echo "===== jp_latest.csv (head) ====="
-          if [ -f jp_latest.csv ]; then head -n 10 jp_latest.csv || true; fi
-          if [ -f jp_latest.csv ] && [ "$(wc -l < jp_latest.csv)" -gt 1 ]; then
-            echo "has_data=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_data=false" >> $GITHUB_OUTPUT
-          fi
-          echo "has_data=$(cat $GITHUB_OUTPUT | sed -n 's/^has_data=//p')"
+          sed -n '1,60p' jp_latest.csv || true
 
-      - name: Generate JP Watchlist（AI自选榜）
-        if: steps.crawl.outputs.has_data == 'true'
-        run: python generate_watchlist.py
-
-      - name: Commit & Push if changed
-        if: steps.crawl.outputs.has_data == 'true'
+      - name: Generate watchlists (生成自选池)
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add jp_latest.csv watchlist_jp.txt || true
-          git commit -m "auto: update stock data" || echo "no changes"
-          git push
+          set -e
+          python generate_watchlist.py
+          echo "===== watchlist_jp.txt (head) ====="
+          sed -n '1,80p' watchlist_jp.txt || true
+
+      - name: Analyze (打分/筛选)
+        run: |
+          set -e
+          python analyze_jp.py
+          echo "===== analyze output (tail) ====="
+          tail -n 60 jp_latest.csv || true
+
+      - name: Upload artifact (csv)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jp_latest_csv
+          path: jp_latest.csv
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Auto commit results
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "auto: update jp_latest.csv & watchlists [skip ci]"
+          file_pattern: |
+            jp_latest.csv
+            watchlist_jp.txt
+            watchlist_jp_growth.txt
+            watchlist_jp_value.txt
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
+          push_options: "--force"
