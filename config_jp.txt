@@ -1,29 +1,4 @@
 TOP_LIMIT=40
-MIN_PRICE=200
-MAX_PRICE=20000
-MIN_TURNOVER=3e8
-
-# 逗号分隔；可留空
-EXCLUDE_SYMBOLS=
-INCLUDE_SECTORS=
-EXCLUDE_SECTORS=
-
-# 防御行业列表（留空则不区分）
-SECTOR_DEFENSIVE=Utilities, Consumer Staples, Healthcare, Telecommunications
-
-# ——综合榜权重（越大越重要）——
-W_CHANGE=0.45
-W_TURNOVER=0.30
-W_MCAP=0.15
-W_DIV=0.10
-W_PE=-0.10     # 负号=PE越低越好
-
-# ——成长榜权重——
-GW_CHANGE=0.6
-GW_TURNOVER=0.3
-GW_MCAP=0.1
-
-# ——价值/防御榜权重——
-VW_DIV=0.45
-VW_PE=-0.35
-VW_MCAP=0.20
+MIN_CHANGE=0
+MIN_TURNOVER=0
+MIN_VALUE=0
