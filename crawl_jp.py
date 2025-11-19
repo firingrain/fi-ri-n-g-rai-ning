@@ -176,7 +176,7 @@ for s in symbols:
             turnover = None
 
         row = {
-            "Symbol": s,
+            "symbolSymbol": s,
             "Last": round(last, 2),
             "Change": round(change, 2),
             "Change%": round(change_pct, 2),
