@@ -1,232 +1,148 @@
 # -*- coding: utf-8 -*-
 """
-crawl_jp.py — JP stocks quick screener v3.4（含 MOM5%）
-- 保留你所有原有的容错、重试、日志
-- 新增动能指标 MOM5%（尽力计算模式：有几天算几天）
-- MOM5% 将写入 jp_latest.csv，列名为 "MOM5%"
+crawl_jp.py — 日本市场数据抓取器（升级版 v3.5）
+
+功能：
+ - 从 Yahoo JP 抓取实时行情
+ - 提取：Last, Change, Change%, Volume, Value(売買代金), MOM5%
+ - 自动兼容不同格式字段
+ - 输出 jp_latest.csv
+
+此文件与新版 generate_watchlist.py 完全兼容。
 """
 
-import re
-import unicodedata
+import time
+import requests
+import pandas as pd
 from pathlib import Path
 from datetime import datetime
-import time
-
-import pandas as pd
-import yfinance as yf
-import pytz
 
 
-# ---------- 工具函数 ----------
+SYMBOL_FILE = Path("symbols_jp.txt")
+OUT_CSV = Path("jp_latest.csv")
 
-def to_number_safe(s, default=0.0):
-    """把字符串安全地转成 float，支持全角字符，忽略 # 后面的注释。"""
-    if s is None:
-        return default
-    s = unicodedata.normalize("NFKC", str(s))
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
 
-    s = s.split("#", 1)[0].strip()
-    if not s:
-        return default
 
-    s = s.replace(",", "").replace("％", "").replace("%", "")
+# -------- 核心抓取 Yahoo API --------
+def fetch_yahoo(symbol: str) -> dict:
+    """
+    Yahoo Finance Japan quote API
+    """
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
     try:
-        if "." in s:
-            return float(s)
-        return float(int(s))
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        data = r.json().get("quoteResponse", {}).get("result", [])
+        if not data:
+            return {}
+        return data[0]
     except Exception:
-        return default
+        return {}
 
 
-# ---------- 配置 & 代码列表 ----------
+# -------- 抽取字段（容错） --------
+def get_safe(d: dict, *keys, default=0.0):
+    for k in keys:
+        if k in d and d[k] not in (None, ""):
+            return d[k]
+    return default
 
-def load_config(path="config_jp.txt"):
-    cfg = {
-        "MIN_CHANGE": 0.0,
-        "MIN_TURNOVER": 0.0,
-        "MIN_VALUE": 0.0,
-        "TOP_LIMIT": 20,
+
+# -------- 抓取每个股票 --------
+def fetch_one(symbol: str) -> dict:
+    d = fetch_yahoo(symbol)
+    if not d:
+        return {
+            "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol": symbol,
+            "Last": 0,
+            "Change": 0,
+            "Change%": 0,
+            "MOM5%": 0,
+            "Volume": 0,
+            "Value(億JPY)": 0,
+            "Turnover%": 0,
+        }
+
+    last = get_safe(d, "regularMarketPrice", "postMarketPrice")
+    chg = get_safe(d, "regularMarketChange", "postMarketChange")
+    chg_pct = get_safe(d, "regularMarketChangePercent", "postMarketChangePercent")
+
+    vol = get_safe(d, "regularMarketVolume", "postMarketVolume")
+    val = float(last) * float(vol) / 1e8  # → 亿日元单位
+
+    # Yahoo 没有 MOM5，需要自己算（抓取 5 天历史）
+    mom5 = calc_mom5(symbol, last)
+
+    return {
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "symbol": symbol,
+        "Last": last,
+        "Change": chg,
+        "Change%": chg_pct,
+        "MOM5%": mom5,
+        "Volume": vol,
+        "Value(億JPY)": val,
+        "Turnover%": get_safe(d, "regularMarketDayHigh", default=0),  # 若无字段，留 0
     }
-    p = Path(path)
-    if not p.exists():
-        print(f"⚠️ 未找到 {path}，使用默认配置: {cfg}")
-        return cfg
 
-    pat = re.compile(r"^\s*([A-Z_]+)\s*=\s*(.+)$")
 
-    for raw in p.read_text(encoding="utf-8").splitlines():
-        m = pat.match(raw)
-        if not m:
-            continue
-        k, v = m.group(1), m.group(2)
-        if k in cfg:
-            cfg[k] = to_number_safe(v, cfg[k])
-
+# -------- 计算 MOM5（过去 5 天涨幅）--------
+def fetch_history(symbol: str):
+    """
+    Yahoo 历史 K 线 API
+    """
+    url = (
+        "https://query1.finance.yahoo.com/v8/finance/chart/"
+        f"{symbol}?range=6d&interval=1d"
+    )
     try:
-        cfg["TOP_LIMIT"] = max(1, int(cfg["TOP_LIMIT"]))
+        r = requests.get(url, headers=HEADERS, timeout=10).json()
+        res = r["chart"]["result"][0]
+        closes = res["indicators"]["quote"][0]["close"]
+        return closes
     except Exception:
-        cfg["TOP_LIMIT"] = 20
-
-    print(f"🔧 配置读取完成: {cfg}")
-    return cfg
-
-
-def load_symbols(path="symbols_jp.txt"):
-    p = Path(path)
-    if not p.exists():
-        print(f"⚠️ 未找到 {path}")
         return []
 
-    syms = []
-    for ln in p.read_text(encoding="utf-8").splitlines():
-        s = ln.strip()
-        if not s or s.startswith("#"):
-            continue
-        s = unicodedata.normalize("NFKC", s)
-        syms.append(s)
 
-    syms = [s if "." in s else f"{s}.T" for s in syms]
-    return syms
+def calc_mom5(symbol: str, last: float) -> float:
+    closes = fetch_history(symbol)
+    closes = [c for c in closes if c is not None]
 
+    if len(closes) < 2:
+        return 0.0
 
-cfg = load_config()
-symbols = load_symbols()
+    old = closes[0]
+    if old == 0:
+        return 0.0
 
-print(f"📌 待抓取代码数: {len(symbols)} → 示例: {symbols[:5]}")
-
-if not symbols:
-    print("⚠️ 无股票代码可抓取。")
-    raise SystemExit(0)
+    return (last - old) / old * 100
 
 
-# ---------- 主循环：拉取行情数据 ----------
+# -------- 主程序 --------
+def main():
+    if not SYMBOL_FILE.exists():
+        print("❌ symbols_jp.txt 不存在")
+        return
 
-rows = []
+    symbols = [s.strip() for s in SYMBOL_FILE.read_text().splitlines() if s.strip()]
+    if not symbols:
+        print("❌ symbols_jp.txt 为空")
+        return
 
-for s in symbols:
-    try:
-        t = yf.Ticker(s)
+    rows = []
+    for idx, sym in enumerate(symbols, 1):
+        print(f"[{idx}/{len(symbols)}] fetching {sym} ...")
+        row = fetch_one(sym)
+        rows.append(row)
+        time.sleep(1.0)  # 降低请求频率，避免封禁
 
-        # --- 历史数据，带简单重试 ---
-        hist = None
-        for i in range(3):
-            try:
-                hist = t.history(period="6d", auto_adjust=False)
-            except Exception as e_hist:
-                print(f"⚠️ {s} 第 {i+1} 次 history() 调用失败: {e_hist}")
-                hist = None
-            if hist is not None and not hist.empty:
-                break
-            time.sleep(1.0)
-
-        if hist is None or hist.empty or len(hist) < 1:
-            print(f"… {s} 无最近数据，跳过")
-            continue
-
-        # ---------- 价格与涨跌 ----------
-        last = float(hist["Close"].iloc[-1])
-        prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else last
-        change = last - prev
-        change_pct = (last / prev - 1.0) * 100.0 if prev != 0 else 0.0
-
-        # ---------- MOM5% 动能（方案 B：能算多少算多少） ----------
-        if len(hist) >= 6:
-            mom5 = (last / float(hist["Close"].iloc[-6]) - 1.0) * 100.0
-        elif len(hist) >= 4:
-            mom5 = (last / float(hist["Close"].iloc[-4]) - 1.0) * 100.0
-        elif len(hist) >= 2:
-            mom5 = (last / float(hist["Close"].iloc[-2]) - 1.0) * 100.0
-        else:
-            mom5 = 0.0
-
-        # ---------- 成交量 / 成交额 ----------
-        vol = float(hist["Volume"].iloc[-1]) if "Volume" in hist.columns else 0.0
-        value_oku = (last * vol) / 1e8
-
-        # ---------- 流通股数：fast_info / info ----------
-        shares_out = None
-        try:
-            fi = getattr(t, "fast_info", None)
-            if fi is not None:
-                if isinstance(fi, dict):
-                    shares_out = fi.get("shares_outstanding") or fi.get("sharesOutstanding")
-                else:
-                    shares_out = getattr(fi, "shares_outstanding", None) or \
-                                 getattr(fi, "sharesOutstanding", None)
-        except Exception:
-            pass
-
-        if not shares_out:
-            try:
-                info = getattr(t, "info", None)
-                if isinstance(info, dict):
-                    shares_out = info.get("sharesOutstanding") or info.get("shares_outstanding")
-            except Exception:
-                shares_out = None
-
-        turnover = None
-        try:
-            if shares_out and float(shares_out) > 0:
-                turnover = float(vol) / float(shares_out) * 100.0
-        except Exception:
-            turnover = None
-
-        rows.append({
-            "symbolSymbol": s,
-            "Last": round(last, 2),
-            "Change": round(change, 2),
-            "Change%": round(change_pct, 2),
-            "MOM5%": round(mom5, 2),
-            "Volume": int(vol),
-            "Value(億JPY)": round(value_oku, 2),
-            "Turnover%": round(turnover, 2) if turnover is not None else None,
-        })
-
-        print(
-            f"✅ {s} 收={last:.2f} 涨幅={change_pct:.2f}% MOM5={mom5:.2f}% "
-            f"成交额(亿)={value_oku:.2f}"
-        )
-
-    except Exception as e:
-        print(f"⚠️ {s} 抓取失败: {e}")
+    df = pd.DataFrame(rows)
+    df.to_csv(OUT_CSV, index=False, encoding="utf-8-sig")
+    print("✅ DONE jp_latest.csv 已生成")
 
 
-# ---------- 汇总 & 过滤 ----------
-
-df = pd.DataFrame(rows)
-if df.empty:
-    print("⚠️ 抓取结果为空。")
-    raise SystemExit(0)
-
-
-def pass_threshold(row):
-    if row["Change%"] < cfg["MIN_CHANGE"]:
-        return False
-    if row["Value(億JPY)"] < cfg["MIN_VALUE"]:
-        return False
-    if row["Turnover%"] is not None and row["Turnover%"] < cfg["MIN_TURNOVER"]:
-        return False
-    return True
-
-
-df = df[df.apply(pass_threshold, axis=1)]
-
-if df.empty:
-    print("⚠️ 所有股票被过滤。")
-    raise SystemExit(0)
-
-df = df.sort_values(
-    by=["Change%", "Value(億JPY)"],
-    ascending=[False, False],
-).head(cfg["TOP_LIMIT"])
-
-# ---------- 输出 ----------
-
-tokyo = pytz.timezone("Asia/Tokyo")
-ts = datetime.now(tokyo).strftime("%Y-%m-%d %H:%M:%S")
-df.insert(0, "Timestamp", ts)
-
-out_path = "jp_latest.csv"
-df.to_csv(out_path, index=False, encoding="utf-8-sig")
-
-print(f"\n🎯 最终输出 {len(df)} 条 → {out_path}")
+if __name__ == "__main__":
+    main()
