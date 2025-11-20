@@ -66,8 +66,8 @@ jobs:
         run: |
           set -e
           python analyze_jp.py
-          echo "===== analyze output (tail) ====="
-          tail -n 60 jp_latest.csv || true
+          echo "===== analyze_jp 输出 ====="
+          sed -n '1,120p' result_jp.txt || true
 
       - name: Upload artifact (csv)
         if: always()
@@ -78,15 +78,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Auto commit results
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "auto: update jp_latest.csv & watchlists [skip ci]"
-          file_pattern: |
-            jp_latest.csv
-            watchlist_jp.txt
-            watchlist_jp_growth.txt
-            watchlist_jp_value.txt
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          push_options: "--force"
+      # -------------------------------
+      # ★ 你要的手写 commit 在这儿 ★
+      # -------------------------------
+      - name: Commit & Push results
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add jp_latest.csv watchlist_jp.txt watchlist_jp_growth.txt watchlist_jp_value.txt result_jp.txt || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "auto: update jp_latest.csv & watchlists [skip ci]"
+            git push
+          fi
