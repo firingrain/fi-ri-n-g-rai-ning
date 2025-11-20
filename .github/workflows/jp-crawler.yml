@@ -78,7 +78,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      # -------------------------------
+
+            # -------------------------------
       # ★ 手写 commit，不使用第三方 action ★
       # -------------------------------
       - name: Commit & Push results
@@ -86,6 +87,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 关键修复：自动同步远端，避免分歧导致拒绝 push
+          git pull --rebase
 
           git add jp_latest.csv watchlist_jp.txt watchlist_jp_growth.txt watchlist_jp_value.txt result_jp.txt || true
 
