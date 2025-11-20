@@ -79,7 +79,7 @@ jobs:
           retention-days: 7
 
 
-            # -------------------------------
+      # -------------------------------
       # ★ 手写 commit，不使用第三方 action ★
       # -------------------------------
       - name: Commit & Push results
@@ -88,9 +88,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 关键修复：自动同步远端，避免分歧导致拒绝 push
+          # 保证工作目录干净，避免 rebase 报错
+          git reset --hard
+
+          # 自动同步远端
           git pull --rebase
 
+          # 添加本次运行更新的文件
           git add jp_latest.csv watchlist_jp.txt watchlist_jp_growth.txt watchlist_jp_value.txt result_jp.txt || true
 
           if git diff --cached --quiet; then
