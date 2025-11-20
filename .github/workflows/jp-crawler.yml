@@ -79,7 +79,7 @@ jobs:
           retention-days: 7
 
       # -------------------------------
-      # ★ 你要的手写 commit 在这儿 ★
+      # ★ 手写 commit，不使用第三方 action ★
       # -------------------------------
       - name: Commit & Push results
         if: success()
