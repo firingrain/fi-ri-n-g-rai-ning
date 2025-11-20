@@ -1,4 +1,35 @@
+# === A2 激进短线配置（强动能 + 适度过滤） ===
+
 TOP_LIMIT=40
-MIN_CHANGE=0
-MIN_TURNOVER=0
-MIN_VALUE=0
+
+# -------- 基本过滤 --------
+MIN_PRICE=300
+MAX_PRICE=30000
+MIN_TURNOVER=5e8
+
+# -------- 行业过滤 --------
+INCLUDE_SECTORS=
+EXCLUDE_SECTORS=
+SECTOR_DEFENSIVE=Utilities, Consumer Staples, Healthcare, Telecommunications
+
+# -------- 排除个股 --------
+EXCLUDE_SYMBOLS=
+
+# -------- 综合榜（General）权重 --------
+W_CHANGE=0.40
+W_TURNOVER=0.30
+W_MCAP=0.10
+W_DIV=0.05
+W_PE=-0.05
+W_MOM5=0.20
+
+# -------- 成长榜（Growth）权重 --------
+GW_CHANGE=0.45
+GW_TURNOVER=0.35
+GW_MCAP=0.10
+GW_MOM5=0.20
+
+# -------- 价值榜（Value）权重 --------
+VW_DIV=0.45
+VW_PE=-0.35
+VW_MCAP=0.20
