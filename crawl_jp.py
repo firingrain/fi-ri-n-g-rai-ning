@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-crawl_jp.py — 日本股票爬虫（Yahoo Finance 版本 · v4.0）
- - 稳定、不封禁
+crawl_jp.py — 日本股票爬虫（yfinance 版本 · v5.0）
+ - Yahoo API 已封禁，本版本使用 yfinance 稳定抓取
  - 支持大规模股票（数百～上千）
  - 自动重试
- - 返回完整行情字段
  - 输出 jp_latest.csv
 """
 
 import time
-import requests
+import yfinance as yf
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
@@ -17,59 +16,63 @@ from datetime import datetime
 SYMBOL_FILE = Path("symbols_jp.txt")
 OUT_CSV = Path("jp_latest.csv")
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
 
-# ================
-# Yahoo Quote API
-# ================
+# =======================
+#   获取主行情数据
+# =======================
 def fetch_quote(symbol: str):
-    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
     try:
-        r = requests.get(url, headers=HEADERS, timeout=10).json()
-        q = r["quoteResponse"]["result"][0]
+        s = yf.Ticker(symbol)
+        info = s.fast_info     # 更快、更稳定
+
+        last = info.get("last_price", 0)
+        prev = info.get("previous_close", 0)
+        volume = info.get("last_volume", 0)
+
+        change = last - prev if prev else 0
+        change_pct = (change / prev * 100) if prev else 0
+        value = (last * volume)
 
         return {
-            "Last": q.get("regularMarketPrice", 0),
-            "Change": q.get("regularMarketChange", 0),
-            "Change%": q.get("regularMarketChangePercent", 0),
-            "Volume": q.get("regularMarketVolume", 0),
-            "Value": q.get("regularMarketVolume", 0) * q.get("regularMarketPrice", 0),
+            "Last": last or 0,
+            "Change": change or 0,
+            "Change%": change_pct or 0,
+            "Volume": volume or 0,
+            "Value": value or 0,
         }
-    except:
+
+    except Exception:
         return {}
 
 
-# ========================
-#   Yahoo Chart (MOM5)
-# ========================
-def fetch_history(symbol: str):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=6d&interval=1d"
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=10).json()
-        closes = r["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-        closes = [c for c in closes if c is not None]
-        return closes
-    except:
-        return []
-
-
+# =======================
+#   获取历史数据 — MOM5
+# =======================
 def calc_mom5(symbol: str, last: float) -> float:
-    closes = fetch_history(symbol)
-    if len(closes) < 2:
+    try:
+        s = yf.Ticker(symbol)
+        hist = s.history(period="6d")
+
+        closes = hist["Close"].dropna().tolist()
+
+        if len(closes) < 2:
+            return 0.0
+
+        old = closes[0]
+        if old == 0:
+            return 0.0
+
+        return (last - old) / old * 100
+    except:
         return 0.0
-    old = closes[0]
-    if old == 0:
-        return 0.0
-    return (last - old) / old * 100
 
 
 # =======================
-#   Fetch one stock
+#   单支股票
 # =======================
 def fetch_one(symbol: str) -> dict:
     # 自动重试 3 次
+    q = {}
     for _ in range(3):
         q = fetch_quote(symbol)
         if q:
@@ -77,7 +80,6 @@ def fetch_one(symbol: str) -> dict:
         time.sleep(1)
 
     if not q:
-        # 返回空行（并不影响后续）
         return {
             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "symbol": symbol,
@@ -102,7 +104,7 @@ def fetch_one(symbol: str) -> dict:
         "MOM5%": mom5,
         "Volume": q["Volume"],
         "Value(億JPY)": q["Value"] / 1e8,
-        "Turnover%": 0,  # 可扩展
+        "Turnover%": 0,
     }
 
 
@@ -116,16 +118,18 @@ def main():
 
     symbols = [s.strip() for s in SYMBOL_FILE.read_text().splitlines() if s.strip()]
 
+    print(f"📌 共 {len(symbols)} 支股票")
     rows = []
+
     for idx, sym in enumerate(symbols, 1):
         print(f"[{idx}/{len(symbols)}] Fetching {sym} ...")
         row = fetch_one(sym)
         rows.append(row)
-        time.sleep(0.3)   # 限速保护，防被封
+        time.sleep(0.2)   # 稍微限速，防止被封
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT_CSV, index=False, encoding="utf-8-sig")
-    print("✅ jp_latest.csv 已更新（Yahoo 数据源）")
+    print("✅ jp_latest.csv 已更新（yfinance 数据源）")
 
 
 if __name__ == "__main__":
