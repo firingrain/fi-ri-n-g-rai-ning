@@ -2,7 +2,7 @@ name: JP Auto Stock Crawler
 
 on:
   schedule:
-    - cron: "30 6 * * 1-5"   # 每个工作日 UTC 06:30 触发（JST 15:30）
+    - cron: "30 6 * * 1-5"   # 每个工作日 UTC 06:30 (JST 15:30)
   workflow_dispatch: {}       # 允许手动运行
 
 permissions:
@@ -43,30 +43,24 @@ jobs:
           sed -n '1,120p' config_jp.txt || true
           echo "===== symbols_jp.txt ====="
           sed -n '1,120p' symbols_jp.txt || true
-          echo "===== watchlist files ====="
-          for f in watchlist_jp.txt watchlist_jp_growth.txt watchlist_jp_value.txt; do
-            echo "--- $f ---"; sed -n '1,80p' "$f" || true
-          done
 
-      - name: Run crawler (抓取)
+      - name: Run crawler
         run: |
           set -e
           python crawl_jp.py
-          echo "===== jp_latest.csv (head) ====="
+          echo "===== jp_latest.csv ====="
           sed -n '1,60p' jp_latest.csv || true
 
-      - name: Generate watchlists (生成自选池)
+      - name: Generate watchlists
         run: |
           set -e
           python generate_watchlist.py
-          echo "===== watchlist_jp.txt (head) ====="
-          sed -n '1,80p' watchlist_jp.txt || true
 
-      - name: Analyze (打分/筛选)
+      - name: Analyze
         run: |
           set -e
           python analyze_jp.py
-          echo "===== analyze_jp 输出 ====="
+          echo "===== analyze result ====="
           sed -n '1,120p' result_jp.txt || true
 
       - name: Upload artifact (csv)
@@ -75,31 +69,32 @@ jobs:
         with:
           name: jp_latest_csv
           path: jp_latest.csv
-          if-no-files-found: warn
           retention-days: 7
 
-
       # -------------------------------
-      # ★ 手写 commit，不使用第三方 action ★
+      #  ★ Best Practice Git Commit ★
       # -------------------------------
-      - name: Commit & Push results
+      - name: Commit & Push updated files
         if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 保证工作目录干净，避免 rebase 报错
-          git reset --hard
-
-          # 自动同步远端
+          # 拉取最新远端，避免提交冲突
           git pull --rebase
 
-          # 添加本次运行更新的文件
-          git add jp_latest.csv watchlist_jp.txt watchlist_jp_growth.txt watchlist_jp_value.txt result_jp.txt || true
+          # 添加所有生成的文件
+          git add jp_latest.csv \
+                 watchlist_jp.txt \
+                 watchlist_jp_growth.txt \
+                 watchlist_jp_value.txt \
+                 result_jp.txt || true
 
+          # 如果没有变化，则退出
           if git diff --cached --quiet; then
             echo "No changes to commit."
-          else
-            git commit -m "auto: update jp_latest.csv & watchlists [skip ci]"
-            git push
+            exit 0
           fi
+
+          git commit -m "auto: update JP crawler results [skip ci]"
+          git push
