@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-crawl_jp.py — 日本股票爬虫（yfinance 版本 · v7，稳定）
- - Yahoo API 封禁 → 使用 yfinance
- - 自动限速、强力异常保护
- - 避免 fast_info 不返回数据
- - 避免 history 请求被拒
- - 保证 800+ 日本股票能完整抓取
+crawl_jp.py — 日本股票爬虫（yfinance 版本 · v7 · 稳定）
+ - 不再使用 fast_info（已大面积失效）
+ - 所有数据改用 history() 获取，稳定可用
+ - MOM5、Change、Change% 全从历史数据计算
+ - 支持 800〜1500 支无异常全量抓取
 """
 
 import time
@@ -19,92 +18,75 @@ OUT_CSV = Path("jp_latest.csv")
 
 
 # ================================
-#   安全获取 fast_info
+#  从 history 获取行情（稳定）
 # ================================
-def fetch_fast_info(ticker: yf.Ticker):
-    """安全获取 fast_info"""
+def fetch_history(symbol: str):
+    """
+    获取近 7 天历史数据，确保：
+    - last_price
+    - previous_close
+    - volume
+    - mom5
+    都能从 history() 计算出来。
+    """
     try:
-        info = ticker.fast_info
-        if not info:
-            return {}
-        return info
-    except Exception:
-        return {}
+        # 获取近 7 天（含今天），避免停牌日导致缺值
+        hist = yf.Ticker(symbol).history(period="7d")
 
+        if hist.empty:
+            return None
 
-# ================================
-#   快速行情数据
-# ================================
-def fetch_quote(symbol: str):
-    try:
-        t = yf.Ticker(symbol)
-        info = fetch_fast_info(t)
+        closes = hist["Close"].dropna().tolist()
+        volumes = hist["Volume"].fillna(0).tolist()
 
-        last = info.get("last_price") or 0
-        prev = info.get("previous_close") or 0
-        volume = info.get("last_volume") or 0
+        # 最新收盘价
+        last = closes[-1]
 
-        if last is None:
-            last = 0
-        if prev is None:
-            prev = 0
-        if volume is None:
-            volume = 0
+        # 昨日收盘价（若只有一天数据，则 previous_close = last）
+        prev = closes[-2] if len(closes) >= 2 else last
 
-        change = last - prev if prev else 0
+        # 今日成交量
+        volume = volumes[-1]
+
+        # 计算变动
+        change = last - prev
         pct = (change / prev * 100) if prev else 0
 
-        value = last * volume
+        # 5 日动能（MOM5）
+        if len(closes) >= 6:
+            old = closes[0]
+            mom5 = (last - old) / old * 100 if old else 0
+        else:
+            mom5 = 0
 
         return {
-            "Last": last,
-            "Change": change,
-            "Change%": pct,
-            "Volume": volume,
-            "Value": value,
+            "Last": float(last),
+            "Previous": float(prev),
+            "Change": float(change),
+            "Change%": float(pct),
+            "Volume": int(volume),
+            "MOM5%": float(mom5),
+            "Value": float(last * volume),
         }
 
     except Exception:
-        return {}
+        return None
 
 
 # ================================
-#   5 日动能 MOM5
-# ================================
-def calc_mom5(symbol: str, last_price: float) -> float:
-    try:
-        t = yf.Ticker(symbol)
-        hist = t.history(period="6d")
-
-        if "Close" not in hist or len(hist) < 2:
-            return 0.0
-
-        closes = hist["Close"].dropna().tolist()
-        old = closes[0]
-
-        if old == 0:
-            return 0.0
-
-        return (last_price - old) / old * 100
-
-    except Exception:
-        return 0.0
-
-
-# ================================
-#   单支抓取
+#         单支抓取逻辑
 # ================================
 def fetch_one(symbol: str) -> dict:
-    # 重试 3 次
-    quote = {}
-    for _ in range(3):
-        quote = fetch_quote(symbol)
-        if quote:
-            break
-        time.sleep(1.0)
+    data = None
 
-    # 完全失败
-    if not quote:
+    # 自动重试 3 次，避免网络抖动
+    for _ in range(3):
+        data = fetch_history(symbol)
+        if data:
+            break
+        time.sleep(1)
+
+    if not data:
         return {
             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "symbol": symbol,
@@ -117,24 +99,21 @@ def fetch_one(symbol: str) -> dict:
             "Turnover%": 0,
         }
 
-    last = quote["Last"]
-    mom5 = calc_mom5(symbol, last)
-
     return {
         "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "symbol": symbol,
-        "Last": last,
-        "Change": quote["Change"],
-        "Change%": quote["Change%"],
-        "MOM5%": mom5,
-        "Volume": quote["Volume"],
-        "Value(億JPY)": quote["Value"] / 1e8,
-        "Turnover%": 0,
+        "Last": data["Last"],
+        "Change": data["Change"],
+        "Change%": data["Change%"],
+        "MOM5%": data["MOM5%"],
+        "Volume": data["Volume"],
+        "Value(億JPY)": data["Value"] / 1e8,
+        "Turnover%": 0,   # 如需可扩展
     }
 
 
 # ================================
-#   MAIN
+#              MAIN
 # ================================
 def main():
     if not SYMBOL_FILE.exists():
@@ -142,28 +121,22 @@ def main():
         return
 
     symbols = [
-        s.strip()
-        for s in SYMBOL_FILE.read_text().splitlines()
+        s.strip() for s in SYMBOL_FILE.read_text().splitlines()
         if s.strip()
     ]
 
     print(f"📌 开始抓取日本股票：共 {len(symbols)} 支")
 
     rows = []
-
     for idx, sym in enumerate(symbols, 1):
         print(f"[{idx}/{len(symbols)}] Fetching {sym} ...")
-
-        row = fetch_one(sym)
-        rows.append(row)
-
-        time.sleep(0.35)  # ⭐ 放大限速，避免 yfinance 拒绝或封禁
+        rows.append(fetch_one(sym))
+        time.sleep(0.15)  # 限速，防封锁
 
     df = pd.DataFrame(rows)
-
     df.to_csv(OUT_CSV, index=False, encoding="utf-8-sig")
 
-    print("\n✅ jp_latest.csv 已成功更新（使用 yfinance · 稳定版）")
+    print("\n✅ jp_latest.csv 已成功更新（使用 history() 数据源）")
 
 
 if __name__ == "__main__":
