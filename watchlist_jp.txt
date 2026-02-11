@@ -1,5 +1,5 @@
 # JP watchlist (general)
-# generated at 2026-02-10T07:46:01Z (UTC)
+# generated at 2026-02-11T07:40:47Z (UTC)
 # filters: MIN_PRICE=300  MAX_PRICE=30000  MIN_TURNOVER=5e8
 # total=40
 # ---- symbols below ----
