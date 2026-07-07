@@ -1,5 +1,5 @@
 # JP watchlist (value/defensive)
-# generated at 2026-07-06T11:19:45Z (UTC)
+# generated at 2026-07-07T10:13:19Z (UTC)
 # filters: MIN_PRICE=300  MAX_PRICE=30000  MIN_TURNOVER=5e8
 # total=0
 # ---- symbols below ----
