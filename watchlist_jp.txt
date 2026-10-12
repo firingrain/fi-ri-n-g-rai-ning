@@ -1,5 +1,5 @@
 # JP watchlist (general)
-# generated at 2026-10-09T13:42:39Z (UTC)
+# generated at 2026-10-12T15:58:27Z (UTC)
 # filters: MIN_PRICE=300  MAX_PRICE=30000  MIN_TURNOVER=5e8
 # total=40
 # ---- symbols below ----
@@ -26,8 +26,8 @@
 8088.T
 7327.T
 8418.T
-9412.T
 3167.T
+9412.T
 7350.T
 8570.T
 5726.T
@@ -35,11 +35,11 @@
 4665.T
 8086.T
 7564.T
-9533.T
 5463.T
+9533.T
 1969.T
 7731.T
 8377.T
+8508.T
 1893.T
 7337.T
-8508.T
